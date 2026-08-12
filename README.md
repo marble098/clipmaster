@@ -121,6 +121,14 @@ ClipMaster/
 - **Edit**: The edit icon opens a dialog to modify a clip's text in place (`ClipRepository.updateClip`), preserving its position in history.
 - **Share**: The share icon hands a clip's text to the Android share sheet (`Intent.ACTION_SEND`) so it can be sent to any app.
 
+## Smart Bubble Positioning
+
+The floating bubble behaves like a chat head:
+- **Edge snapping**: Releasing a drag glides the bubble to whichever screen edge (left/right) it's closer to, animated with a `ValueAnimator`.
+- **Bounds-aware**: The bubble is clamped vertically during drag and after rotation so it never lands under the status bar or nav bar.
+- **Remembers its spot**: The resting edge and vertical position are saved to `SharedPreferences` and restored the next time `FloatingBubbleService` starts.
+- **Rotation-aware**: `onConfigurationChanged` re-clamps and re-snaps the bubble when the screen rotates.
+
 ## FIFO Logic
 
 The Room database enforces a strict 50-entry cap:

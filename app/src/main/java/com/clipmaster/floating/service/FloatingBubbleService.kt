@@ -1,17 +1,22 @@
 package com.clipmaster.floating.service
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.content.res.Configuration
+import android.graphics.Point
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.DecelerateInterpolator
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
@@ -54,6 +59,11 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     @Volatile private var lastSeenClip: String? = null
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         onSystemClipboardChanged()
+    }
+
+    private var bubbleParams: WindowManager.LayoutParams? = null
+    private val bubblePrefs: SharedPreferences by lazy {
+        getSharedPreferences("clipmaster_bubble", Context.MODE_PRIVATE)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -116,6 +126,13 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
     @SuppressLint("ClickableViewAccessibility")
     private fun showBubble() {
+        val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
+        val screen = screenSize()
+        val savedIsLeft = bubblePrefs.getBoolean(KEY_BUBBLE_LEFT, true)
+        val savedY = bubblePrefs.getInt(KEY_BUBBLE_Y, screen.y / 3)
+            .coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
+        val startX = if (savedIsLeft) 0 else (screen.x - bubbleSizePx).coerceAtLeast(0)
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -125,9 +142,10 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 0
-            y = 300
+            x = startX
+            y = savedY
         }
+        bubbleParams = params
 
         bubbleView = ComposeView(this).also { view ->
             view.setViewTreeLifecycleOwner(this)
@@ -159,14 +177,18 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                         val dx = event.rawX - initialTouchX
                         val dy = event.rawY - initialTouchY
                         if (abs(dx) > 5 || abs(dy) > 5) moved = true
+                        val bounds = screenSize()
                         params.x = initialX + dx.toInt()
-                        params.y = initialY + dy.toInt()
+                        params.y = (initialY + dy.toInt())
+                            .coerceIn(0, (bounds.y - bubbleSizePx).coerceAtLeast(0))
                         windowManager.updateViewLayout(view, params)
                         true
                     }
                     MotionEvent.ACTION_UP -> {
                         if (!moved) {
                             view.performClick()
+                        } else {
+                            snapToNearestEdge(view, params, bubbleSizePx)
                         }
                         true
                     }
@@ -176,6 +198,70 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
             windowManager.addView(view, params)
         }
+    }
+
+    /**
+     * Chat-head-style "smart" placement: after a drag, glide the bubble to
+     * whichever screen edge (left/right) it's closer to, clamp it vertically
+     * so it never lands under the status bar or nav bar, and remember the
+     * resting spot so it's restored next time the service starts.
+     */
+    private fun snapToNearestEdge(view: View, params: WindowManager.LayoutParams, bubbleSizePx: Int) {
+        val screen = screenSize()
+        val clampedY = params.y.coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
+        val targetX = if (params.x + bubbleSizePx / 2 < screen.x / 2) {
+            0
+        } else {
+            (screen.x - bubbleSizePx).coerceAtLeast(0)
+        }
+
+        params.y = clampedY
+        ValueAnimator.ofInt(params.x, targetX).apply {
+            duration = 220
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { animator ->
+                params.x = animator.animatedValue as Int
+                try { windowManager.updateViewLayout(view, params) } catch (_: Exception) {}
+            }
+            start()
+        }
+
+        saveBubblePosition(targetX, clampedY, screen.x, bubbleSizePx)
+    }
+
+    private fun saveBubblePosition(x: Int, y: Int, screenWidth: Int, bubbleSizePx: Int) {
+        val isLeft = x < (screenWidth - bubbleSizePx) / 2
+        bubblePrefs.edit()
+            .putBoolean(KEY_BUBBLE_LEFT, isLeft)
+            .putInt(KEY_BUBBLE_Y, y)
+            .apply()
+    }
+
+    private fun dpToPx(dp: Int): Int = (dp * resources.displayMetrics.density).toInt()
+
+    @Suppress("DEPRECATION")
+    private fun screenSize(): Point {
+        val point = Point()
+        windowManager.defaultDisplay.getRealSize(point)
+        return point
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val view = bubbleView ?: return
+        val params = bubbleParams ?: return
+        val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
+        val screen = screenSize()
+
+        params.x = if (params.x + bubbleSizePx / 2 < screen.x / 2) {
+            0
+        } else {
+            (screen.x - bubbleSizePx).coerceAtLeast(0)
+        }
+        params.y = params.y.coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
+
+        try { windowManager.updateViewLayout(view, params) } catch (_: Exception) {}
+        saveBubblePosition(params.x, params.y, screen.x, bubbleSizePx)
     }
 
     private var panelShowing = false
@@ -268,5 +354,12 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             try { windowManager.removeView(it) } catch (_: Exception) {}
         }
         panelView = null
+    }
+
+    companion object {
+        // Must match FloatingBubble's Box(.size(52.dp)) in BubbleComposeView.kt
+        private const val BUBBLE_SIZE_DP = 52
+        private const val KEY_BUBBLE_LEFT = "bubble_edge_left"
+        private const val KEY_BUBBLE_Y = "bubble_y"
     }
 }
