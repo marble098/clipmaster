@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,7 +26,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.clipmaster.floating.data.db.ClipEntry
 
 /** The four corners the floating bubble can be explicitly moved to. */
@@ -55,54 +55,27 @@ fun ClipPanel(
     var moveMenuExpanded by remember { mutableStateOf(false) }
     var showClearConfirm by remember { mutableStateOf(false) }
 
-    editingEntry?.let { entry ->
-        EditClipDialog(
-            entry = entry,
-            onDismiss = { editingEntry = null },
-            onSave = { newContent ->
-                onEdit(entry, newContent)
-                editingEntry = null
-            },
-        )
-    }
-
-    if (showClearConfirm) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirm = false },
-            containerColor = Color(0xFF1E1E2E),
-            title = { Text("Clear all clips?", color = Color.White) },
-            text = {
-                Text(
-                    "This permanently deletes all ${entries.size} saved clips.",
-                    color = Color.White.copy(0.7f),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = { onClearAll(); showClearConfirm = false }) {
-                    Text("Clear all", color = Color(0xFFEF4444))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirm = false }) {
-                    Text("Cancel", color = Color.White.copy(0.6f))
-                }
-            },
-        )
-    }
-
     AnimatedVisibility(
         visible = expanded,
         enter = scaleIn(spring(dampingRatio = 0.7f)) + fadeIn(),
         exit = scaleOut() + fadeOut(),
     ) {
-        Card(
-            modifier = Modifier
-                .width(300.dp)
-                .heightIn(max = 420.dp)
-                .shadow(12.dp, RoundedCornerShape(20.dp)),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
-        ) {
+        // A plain Box, not a platform Dialog/AlertDialog: this whole panel is
+        // itself hosted in a WindowManager overlay window owned by a Service
+        // (no Activity), and android.app.Dialog (which Compose's Dialog/
+        // AlertDialog are built on) needs an Activity-derived window token —
+        // showing one here throws WindowManager.BadTokenException and crashes
+        // the app. Edit/clear-confirm are rendered as an in-tree scrim+card
+        // overlay instead, sized to match the panel via matchParentSize().
+        Box {
+            Card(
+                modifier = Modifier
+                    .width(300.dp)
+                    .heightIn(max = 420.dp)
+                    .shadow(12.dp, RoundedCornerShape(20.dp)),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+            ) {
             Column {
                 // Header
                 Row(
@@ -229,6 +202,37 @@ fun ClipPanel(
                     }
                 }
             }
+            }
+
+            editingEntry?.let { entry ->
+                Box(modifier = Modifier.matchParentSize()) {
+                    ScrimOverlay(onDismissRequest = { editingEntry = null }) {
+                        EditClipCard(
+                            entry = entry,
+                            onDismiss = { editingEntry = null },
+                            onSave = { newContent ->
+                                onEdit(entry, newContent)
+                                editingEntry = null
+                            },
+                        )
+                    }
+                }
+            }
+
+            if (showClearConfirm) {
+                Box(modifier = Modifier.matchParentSize()) {
+                    ScrimOverlay(onDismissRequest = { showClearConfirm = false }) {
+                        ClearAllConfirmCard(
+                            count = entries.size,
+                            onDismiss = { showClearConfirm = false },
+                            onConfirm = {
+                                onClearAll()
+                                showClearConfirm = false
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -323,58 +327,132 @@ private fun RowIconButton(
 }
 
 /**
- * Dialog for editing a clip's text before it's saved back to history.
+ * Full-bleed scrim + centered card, standing in for a platform Dialog.
+ * Renders in-tree (inside the panel's own overlay window) instead of
+ * spawning a new android.app.Dialog window, which crashes when the host
+ * window belongs to a Service rather than an Activity.
  */
 @Composable
-private fun EditClipDialog(
+private fun ScrimOverlay(onDismissRequest: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onDismissRequest,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(20.dp)
+                // Consumes taps on the card itself so they don't fall through
+                // to the scrim's dismiss handler above.
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = {},
+                ),
+        ) {
+            content()
+        }
+    }
+}
+
+/** Card content for editing a clip's text before it's saved back to history. */
+@Composable
+private fun EditClipCard(
     entry: ClipEntry,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
 ) {
     var text by remember(entry.id) { mutableStateOf(entry.content) }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    "Edit clip",
-                    color = Color.White,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 16.sp,
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 100.dp, max = 240.dp),
-                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 13.sp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF818CF8),
-                        unfocusedBorderColor = Color.White.copy(0.2f),
-                        cursorColor = Color(0xFF818CF8),
-                    ),
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(0.6f))
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) {
-                        Text("Save", color = Color(0xFF818CF8))
-                    }
+    Card(
+        modifier = Modifier.width(260.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                "Edit clip",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 100.dp, max = 240.dp),
+                textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 13.sp),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = Color(0xFF818CF8),
+                    unfocusedBorderColor = Color.White.copy(0.2f),
+                    cursorColor = Color(0xFF818CF8),
+                ),
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = Color.White.copy(0.6f))
+                }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) {
+                    Text("Save", color = Color(0xFF818CF8))
+                }
+            }
+        }
+    }
+}
+
+/** Card content confirming the "Clear all clips" action. */
+@Composable
+private fun ClearAllConfirmCard(
+    count: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.width(260.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Text(
+                "Clear all clips?",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "This permanently deletes all $count saved clips.",
+                color = Color.White.copy(0.7f),
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel", color = Color.White.copy(0.6f))
+                }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = onConfirm) {
+                    Text("Clear all", color = Color(0xFFEF4444))
                 }
             }
         }
