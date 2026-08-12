@@ -1,0 +1,6 @@
+id=clipmaster
+name=ClipMaster Floating Clipboard
+version=v1.0.0
+versionCode=1
+author=ClipMaster
+description=System-level floating clipboard manager with root-powered text injection. Installs as a privileged system app.

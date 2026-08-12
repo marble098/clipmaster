@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ClipMaster</string>
+    <string name="accessibility_desc">ClipMaster uses accessibility to capture text from any screen and paste into active fields. No data leaves your device.</string>
+    <string name="notif_channel_name">ClipMaster Background</string>
+    <string name="notif_channel_desc">Keeps the floating clipboard bubble running</string>
+</resources>

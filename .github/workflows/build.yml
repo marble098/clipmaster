@@ -1,0 +1,104 @@
+name: Build ClipMaster
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Generate debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair \
+            -alias clipmaster \
+            -keypass android \
+            -keystore $HOME/.android/clipmaster-debug.jks \
+            -storepass android \
+            -dname "CN=ClipMaster,OU=Dev,O=ClipMaster,L=Unknown,ST=Unknown,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.7
+
+      - name: Build Release APK
+        run: ./gradlew assembleRelease
+
+      - name: Sign APK
+        run: |
+          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
+          ${BUILD_TOOLS}apksigner sign \
+            --ks $HOME/.android/clipmaster-debug.jks \
+            --ks-key-alias clipmaster \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out app/build/outputs/apk/release/ClipMaster-signed.apk \
+            app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Package KernelSU Module
+        run: |
+          MODULE_DIR="build/kernelsu-module"
+          mkdir -p "$MODULE_DIR/system/app/ClipMaster"
+
+          cp app/build/outputs/apk/release/ClipMaster-signed.apk \
+             "$MODULE_DIR/system/app/ClipMaster/ClipMaster.apk"
+          cp kernelsu/module.prop "$MODULE_DIR/"
+          cp kernelsu/customize.sh "$MODULE_DIR/"
+
+          mkdir -p "$MODULE_DIR/META-INF/com/google/android"
+          cat > "$MODULE_DIR/META-INF/com/google/android/updater-script" <<'EOF'
+          #MAGISK
+          EOF
+          cat > "$MODULE_DIR/META-INF/com/google/android/update-binary" <<'SHELL'
+          #!/sbin/sh
+          TMPDIR=/dev/tmp
+          MOUNTPATH=/dev/magisk_merge
+          [ -d $MOUNTPATH ] || mkdir -p $MOUNTPATH
+          # KernelSU/Magisk will handle the rest via customize.sh
+          ZIPFILE=$3
+          unzip -o "$ZIPFILE" customize.sh -d $TMPDIR 2>/dev/null
+          if [ -f "$TMPDIR/customize.sh" ]; then
+            . "$TMPDIR/customize.sh"
+          fi
+          SHELL
+          chmod +x "$MODULE_DIR/META-INF/com/google/android/update-binary"
+
+          cd "$MODULE_DIR" && zip -r ../../ClipMaster-KernelSU-Module.zip . -x '*.DS_Store'
+
+      - name: Upload Signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipMaster-APK
+          path: app/build/outputs/apk/release/ClipMaster-signed.apk
+          if-no-files-found: error
+
+      - name: Upload KernelSU Module
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClipMaster-KernelSU-Module
+          path: build/ClipMaster-KernelSU-Module.zip
+          if-no-files-found: error
