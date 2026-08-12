@@ -13,16 +13,24 @@ class ClipRepository(private val dao: ClipDao) {
     fun clipCount(): Flow<Int> = dao.observeCount()
 
     /**
-     * Insert a new clip, skip if it duplicates the most recent entry,
-     * then prune to enforce the [historyLimit] FIFO cap.
+     * Insert a new clip, then prune to enforce the [historyLimit] FIFO cap.
+     * If this exact text already exists anywhere in history, it's bumped
+     * back to the top (fresh timestamp) instead of being inserted again —
+     * otherwise re-copying the same thing repeatedly would show it more
+     * than once in the list.
      */
     suspend fun addClip(content: String, sourceApp: String? = null, historyLimit: Int) {
         val trimmed = content.trim()
         if (trimmed.isBlank()) return
 
-        // Deduplicate against the last entry
         val last = dao.lastEntry()
         if (last != null && last.content == trimmed) return
+
+        val existing = dao.findByContent(trimmed)
+        if (existing != null) {
+            dao.touch(existing.id, System.currentTimeMillis(), sourceApp ?: existing.sourceApp)
+            return
+        }
 
         dao.insert(ClipEntry(content = trimmed, sourceApp = sourceApp))
         dao.pruneOldEntries(historyLimit)

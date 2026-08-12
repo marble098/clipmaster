@@ -13,16 +13,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clipmaster.floating.settings.AppSettings
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,9 +34,16 @@ fun SettingsScreen(
     onSettingsChange: ((AppSettings) -> AppSettings) -> Unit,
     onResetBubblePosition: () -> Unit,
     onClearAllClips: () -> Unit,
+    onGenerateDebugReport: suspend () -> String,
+    onShareDebugReport: (String) -> Unit,
+    onCopyDebugReport: (String) -> Unit,
+    onClearCrashLog: () -> Unit,
     onBack: () -> Unit,
 ) {
     var showClearConfirm by remember { mutableStateOf(false) }
+    var debugReport by remember { mutableStateOf<String?>(null) }
+    var generatingReport by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     if (showClearConfirm) {
         AlertDialog(
@@ -149,6 +159,68 @@ fun SettingsScreen(
                         icon = Icons.Rounded.DeleteSweep,
                         destructive = true,
                         onClick = { showClearConfirm = true },
+                    )
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                SectionLabel("Debug")
+                SettingsCard {
+                    ActionRow(
+                        title = if (generatingReport) "Generating…" else "Generate debug report",
+                        description = "Collects app/device info, permission status, current settings, and any recorded crashes — for tracking down bugs.",
+                        icon = Icons.Rounded.BugReport,
+                        onClick = {
+                            if (!generatingReport) {
+                                generatingReport = true
+                                scope.launch {
+                                    debugReport = onGenerateDebugReport()
+                                    generatingReport = false
+                                }
+                            }
+                        },
+                    )
+                    debugReport?.let { report ->
+                        RowDivider()
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 220.dp),
+                                color = Color.Black.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    report,
+                                    modifier = Modifier
+                                        .padding(12.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    color = Color.White.copy(0.8f),
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = { onCopyDebugReport(report) },
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("Copy") }
+                                Button(
+                                    onClick = { onShareDebugReport(report) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF818CF8)),
+                                ) { Text("Share") }
+                            }
+                        }
+                    }
+                    RowDivider()
+                    ActionRow(
+                        title = "Clear crash log",
+                        description = "Delete recorded crash history used in the debug report.",
+                        icon = Icons.Rounded.DeleteOutline,
+                        onClick = onClearCrashLog,
                     )
                 }
 

@@ -62,6 +62,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true // exposes BuildConfig.VERSION_NAME/VERSION_CODE, used in the Settings debug report
     }
 }
 

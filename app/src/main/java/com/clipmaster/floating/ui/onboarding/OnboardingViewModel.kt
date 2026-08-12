@@ -25,6 +25,11 @@ class OnboardingViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(OnboardingState())
     val state: StateFlow<OnboardingState> = _state.asStateFlow()
 
+    /**
+     * Re-checks every permission, including root — so once root/overlay/
+     * accessibility have been granted, reopening the app reflects that
+     * automatically instead of asking the user to grant them again.
+     */
     fun refreshPermissions() {
         val ctx = getApplication<Application>()
         _state.update {
@@ -32,6 +37,10 @@ class OnboardingViewModel(app: Application) : AndroidViewModel(app) {
                 overlayGranted = PermissionHelper.hasOverlayPermission(ctx),
                 accessibilityGranted = PermissionHelper.hasAccessibilityEnabled(ctx),
             )
+        }
+        viewModelScope.launch {
+            val granted = PermissionHelper.hasRootAccess()
+            _state.update { it.copy(rootGranted = granted) }
         }
     }
 

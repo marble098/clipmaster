@@ -9,7 +9,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.lifecycleScope
 import com.clipmaster.floating.ClipMasterApp
+import com.clipmaster.floating.clipboard.ClipboardHelper
 import com.clipmaster.floating.data.repository.ClipRepository
+import com.clipmaster.floating.debug.CrashLogger
+import com.clipmaster.floating.debug.DebugReport
 import com.clipmaster.floating.service.FloatingBubbleService
 import com.clipmaster.floating.settings.SettingsStore
 import com.clipmaster.floating.ui.theme.ClipMasterTheme
@@ -39,6 +42,18 @@ class SettingsActivity : ComponentActivity() {
                     onClearAllClips = {
                         lifecycleScope.launch { repository.clearAll() }
                     },
+                    onGenerateDebugReport = { DebugReport.generate(this@SettingsActivity) },
+                    onShareDebugReport = { report ->
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, report)
+                        }
+                        startActivity(Intent.createChooser(shareIntent, "Share debug report"))
+                    },
+                    onCopyDebugReport = { report ->
+                        ClipboardHelper.copyToClipboard(this@SettingsActivity, report, label = "ClipMaster debug report")
+                    },
+                    onClearCrashLog = { CrashLogger.clear(this@SettingsActivity) },
                     onBack = { finish() },
                 )
             }

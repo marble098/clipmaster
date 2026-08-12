@@ -43,4 +43,12 @@ interface ClipDao {
     /** Prevent storing exact duplicate text back-to-back. */
     @Query("SELECT * FROM clip_entries ORDER BY timestamp DESC LIMIT 1")
     suspend fun lastEntry(): ClipEntry?
+
+    /** Find an existing clip with this exact text, anywhere in history. */
+    @Query("SELECT * FROM clip_entries WHERE content = :content LIMIT 1")
+    suspend fun findByContent(content: String): ClipEntry?
+
+    /** Bump an existing clip back to the top (and refresh its source app) instead of duplicating it. */
+    @Query("UPDATE clip_entries SET timestamp = :timestamp, sourceApp = :sourceApp WHERE id = :id")
+    suspend fun touch(id: Long, timestamp: Long, sourceApp: String?)
 }

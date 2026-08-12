@@ -277,3 +277,90 @@ private fun PermissionCard(step: PermStep, onAction: () -> Unit) {
         }
     }
 }
+
+/**
+ * Shown instead of the permission wizard once root/overlay/accessibility are
+ * all already granted, so reopening the app never asks for them again.
+ */
+@Composable
+fun AlreadySetupScreen(onOpenSettings: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0F0F1A),
+                        Color(0xFF1A1A2E),
+                        Color(0xFF16213E),
+                    )
+                )
+            ),
+    ) {
+        IconButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .systemBarsPadding()
+                .padding(12.dp),
+        ) {
+            Icon(Icons.Rounded.Settings, "Settings", tint = Color.White.copy(alpha = 0.8f))
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF4ADE80).copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = Color(0xFF4ADE80),
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                "ClipMaster is set up",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White,
+            )
+
+            Spacer(Modifier.height(12.dp))
+
+            Text(
+                "The floating bubble is running. Look for it on your screen, or open Settings to customize it.",
+                fontSize = 14.sp,
+                color = Color.White.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp,
+            )
+
+            Spacer(Modifier.height(28.dp))
+
+            Button(
+                onClick = onOpenSettings,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF818CF8)),
+                shape = RoundedCornerShape(14.dp),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
+            ) {
+                Icon(Icons.Rounded.Settings, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Open Settings", fontSize = 15.sp)
+            }
+        }
+    }
+}

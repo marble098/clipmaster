@@ -144,13 +144,22 @@ A full settings screen (`SettingsActivity` / `SettingsScreen.kt`, reachable from
 - Clip history limit (20 / 50 / 100 / 200), which also drives `ClipDao`'s FIFO cap
 - Reset bubble position
 - Clear all clips
+- **Debug report**: generates a plain-text snapshot (app/device info, permission status, current settings, clip count, and any recorded crashes) that can be copied or shared. `CrashLogger` installs an uncaught-exception handler in `ClipMasterApp` that appends crash stack traces to a small rolling log file, which feeds into the report — a "Clear crash log" action wipes it.
 
-## FIFO Logic
+## Permission Wizard
+
+`MainActivity` shows the onboarding permission wizard only until root/overlay/accessibility are all granted. Once they are, reopening the app (launcher icon or the persistent notification) goes straight to an "already set up" screen instead of re-showing the wizard, and the bubble service is (re)started automatically if it isn't already running. `OnboardingViewModel.refreshPermissions()` re-checks root status too, not just overlay/accessibility, so this reflects reality on every launch without the user re-tapping "Grant Root".
+
+## FIFO Logic & Deduplication
 
 The Room database enforces a FIFO cap set by the "Clip history limit" setting (default 50):
 1. On every insert, `ClipDao.pruneOldEntries(limit)` runs a DELETE that keeps only the `limit` newest rows by timestamp.
-2. Back-to-back duplicate text is skipped at the repository layer.
+2. Re-copying text that's already anywhere in history doesn't insert a duplicate row — `ClipRepository.addClip` looks it up via `ClipDao.findByContent` and bumps its timestamp (and source app) back to the top instead, via `ClipDao.touch`. Back-to-back identical copies of the current top entry are skipped outright.
 3. The UI observes `ClipDao.observeRecent(limit)` (a `Flow<List<ClipEntry>>`) for live updates; `ClipDao.observeCount()` separately tracks the total count for bubble auto-hide, independent of the display limit.
+
+## A Note on Dialogs in the Floating Panel
+
+The clip panel is hosted in a `Service`-owned `WindowManager` overlay window — there's no Activity behind it. Compose's `Dialog`/`AlertDialog` are backed by `android.app.Dialog`, which needs an Activity-derived window token; showing one from a Service-hosted window throws `WindowManager.BadTokenException` and crashes the app. The panel's "Edit" and "Clear all" confirmations are therefore custom in-tree scrim + card overlays (see `ScrimOverlay` in `BubbleComposeView.kt`) rather than platform dialogs. `SettingsActivity` is a real Activity, so `AlertDialog` there is fine and unaffected.
 
 ## KernelSU Module Packaging
 
