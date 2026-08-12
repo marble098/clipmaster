@@ -70,6 +70,8 @@ ClipMaster/
 │       │   │   └── BootReceiver.kt        ← Auto-start after reboot
 │       │   ├── root/
 │       │   │   └── RootExecutor.kt        ← su shell commands for clipboard
+│       │   ├── clipboard/
+│       │   │   └── ClipboardHelper.kt     ← ClipboardManager read/write (+ root fallback)
 │       │   ├── ui/
 │       │   │   ├── theme/                 ← Material3 dark theme
 │       │   │   ├── onboarding/            ← Pager-based permission setup
@@ -120,13 +122,15 @@ ClipMaster/
 - **Re-copy**: Tapping a clip (or its copy icon) writes it back to the system clipboard via `ClipboardHelper`, which uses the standard `ClipboardManager` API first and falls back to the root shell write in `RootExecutor` if the OS blocks background clipboard access.
 - **Edit**: The edit icon opens a dialog to modify a clip's text in place (`ClipRepository.updateClip`), preserving its position in history.
 - **Share**: The share icon hands a clip's text to the Android share sheet (`Intent.ACTION_SEND`) so it can be sent to any app.
+- **Clear all**: The "Clear all" chip (with a confirmation dialog) wipes the entire clip history via `ClipRepository.clearAll()`.
 
 ## Smart Bubble Positioning
 
-The floating bubble behaves like a chat head:
-- **Edge snapping**: Releasing a drag glides the bubble to whichever screen edge (left/right) it's closer to, animated with a `ValueAnimator`.
+The floating bubble behaves like a chat head, with two ways to reposition it:
+- **Drag + edge snapping**: Releasing a drag glides the bubble to whichever screen edge (left/right) it's closer to, animated with a `ValueAnimator`.
+- **Tap-to-move**: The panel's "Move" chip opens a menu to jump the bubble straight to any of the four screen corners.
 - **Bounds-aware**: The bubble is clamped vertically during drag and after rotation so it never lands under the status bar or nav bar.
-- **Remembers its spot**: The resting edge and vertical position are saved to `SharedPreferences` and restored the next time `FloatingBubbleService` starts.
+- **Remembers its spot**: The resting position is saved to `SharedPreferences` and restored the next time `FloatingBubbleService` starts.
 - **Rotation-aware**: `onConfigurationChanged` re-clamps and re-snaps the bubble when the screen rotates.
 
 ## FIFO Logic
@@ -153,8 +157,12 @@ ClipMaster-KernelSU-Module.zip
 
 When flashed, `customize.sh` validates the device meets API 26+, sets file permissions, and the module manager overlays the APK onto `/system/app/`, granting it system-app privileges automatically.
 
+## Signing & Versioning
+
+- **Consistent signature across builds**: `keystore/clipmaster-release.jks` is committed to the repo and wired up as the `release` signing config in `app/build.gradle.kts`. Every build — any commit, CI or local — signs with this same key, so a newly built APK always installs as an update over a previous one instead of failing with "signatures do not match". For real production use, swap this for a private keystore delivered via GitHub Secrets instead.
+- **Auto-incrementing version**: `versionCode`/`versionName` are derived from the CI-provided `GITHUB_RUN_NUMBER` env var (`app/build.gradle.kts`), so every GitHub Actions build gets its own unique, ever-increasing version with no manual bump. The KernelSU module's `module.prop` is stamped with the same build number during packaging (see `build.yml`). Local builds outside CI fall back to build `1`.
+
 ## Important Notes
 
 - **Gradle wrapper JAR**: You'll need to run `gradle wrapper` once locally or add the `gradle-wrapper.jar` binary to the repo. GitHub's `setup-java` action with Gradle cache handles this, but if the jar is missing, add it via `gradle wrapper --gradle-version 8.8` from any machine with Gradle installed.
-- **Signing**: The CI generates a throwaway debug keystore. For production, replace it with GitHub Secrets (`KEYSTORE_BASE64`, `KEY_ALIAS`, `KEY_PASSWORD`, `STORE_PASSWORD`) and decode in the workflow.
 - **Accessibility caution**: Google Play restricts accessibility service usage. This app is designed for sideloading or system-level installation via KernelSU/Magisk.

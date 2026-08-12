@@ -28,6 +28,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.clipmaster.floating.data.db.ClipEntry
 
+/** The four corners the floating bubble can be explicitly moved to. */
+enum class BubbleCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
+
 /**
  * The expanded clipboard panel shown when the floating bubble is tapped.
  * Displays recent clip history and provides capture/copy/edit/share actions.
@@ -42,8 +45,12 @@ fun ClipPanel(
     onEdit: (ClipEntry, String) -> Unit,
     onShare: (ClipEntry) -> Unit,
     onDelete: (ClipEntry) -> Unit,
+    onMove: (BubbleCorner) -> Unit,
+    onClearAll: () -> Unit,
 ) {
     var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
+    var moveMenuExpanded by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     editingEntry?.let { entry ->
         EditClipDialog(
@@ -52,6 +59,30 @@ fun ClipPanel(
             onSave = { newContent ->
                 onEdit(entry, newContent)
                 editingEntry = null
+            },
+        )
+    }
+
+    if (showClearConfirm) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirm = false },
+            containerColor = Color(0xFF1E1E2E),
+            title = { Text("Clear all clips?", color = Color.White) },
+            text = {
+                Text(
+                    "This permanently deletes all ${entries.size} saved clips.",
+                    color = Color.White.copy(0.7f),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { onClearAll(); showClearConfirm = false }) {
+                    Text("Clear all", color = Color(0xFFEF4444))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirm = false }) {
+                    Text("Cancel", color = Color.White.copy(0.6f))
+                }
             },
         )
     }
@@ -113,6 +144,51 @@ fun ClipPanel(
                     }
                 }
 
+                // Move bubble / clear all
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        ActionChip(
+                            icon = Icons.Rounded.OpenWith,
+                            label = "Move",
+                            onClick = { moveMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        DropdownMenu(
+                            expanded = moveMenuExpanded,
+                            onDismissRequest = { moveMenuExpanded = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Top left") },
+                                onClick = { moveMenuExpanded = false; onMove(BubbleCorner.TOP_LEFT) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Top right") },
+                                onClick = { moveMenuExpanded = false; onMove(BubbleCorner.TOP_RIGHT) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Bottom left") },
+                                onClick = { moveMenuExpanded = false; onMove(BubbleCorner.BOTTOM_LEFT) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Bottom right") },
+                                onClick = { moveMenuExpanded = false; onMove(BubbleCorner.BOTTOM_RIGHT) },
+                            )
+                        }
+                    }
+                    ActionChip(
+                        icon = Icons.Rounded.DeleteSweep,
+                        label = "Clear all",
+                        enabled = entries.isNotEmpty(),
+                        onClick = { showClearConfirm = true },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
                 // Clip list
                 if (entries.isEmpty()) {
                     Box(
@@ -146,6 +222,34 @@ fun ClipPanel(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ActionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val tint = Color.White.copy(if (enabled) 0.6f else 0.25f)
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        color = Color.White.copy(alpha = 0.06f),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = tint, fontSize = 12.sp)
         }
     }
 }

@@ -9,9 +9,15 @@ import kotlinx.coroutines.*
 
 /**
  * Accessibility service that:
- *  1. Monitors clipboard changes via TYPE_VIEW_TEXT_CHANGED events.
- *  2. Provides an on-demand full-screen text capture via [captureScreenText].
- *  3. Can paste text into the currently focused editable field via [pasteIntoFocused].
+ *  1. Provides an on-demand full-screen text capture via [captureScreenText].
+ *  2. Can paste text into the currently focused editable field via [pasteIntoFocused].
+ *
+ * Automatic clip capture is handled by [FloatingBubbleService]'s system
+ * ClipboardManager listener, which fires precisely when something is copied.
+ * This service intentionally does not auto-capture from accessibility events
+ * (e.g. TYPE_VIEW_TEXT_SELECTION_CHANGED) — that fires on every cursor move
+ * or selection drag, not just copies, and would flood clip history with
+ * entries the user never actually copied.
  *
  * The service keeps a static [instance] reference so the FloatingBubbleService
  * can trigger captures without binding.
@@ -33,22 +39,7 @@ class ClipAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        event ?: return
-        when (event.eventType) {
-            // Capture text that the user copies (selection-based)
-            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                val text = event.text?.joinToString("") ?: return
-                if (text.isNotBlank()) {
-                    val pkg = event.packageName?.toString()
-                    scope.launch { repository.addClip(text, pkg) }
-                }
-            }
-            // Capture clipboard changes
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                // Light-touch: we rely on captureScreenText() for full scraping
-            }
-            else -> {}
-        }
+        // No-op: capture is driven by the system clipboard listener instead.
     }
 
     override fun onInterrupt() {}

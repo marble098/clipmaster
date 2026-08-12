@@ -19,6 +19,9 @@ interface ClipDao {
     @Delete
     suspend fun delete(entry: ClipEntry)
 
+    @Query("DELETE FROM clip_entries")
+    suspend fun deleteAll()
+
     /** Count total rows. */
     @Query("SELECT COUNT(*) FROM clip_entries")
     suspend fun count(): Int

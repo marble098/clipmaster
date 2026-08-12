@@ -30,6 +30,7 @@ import com.clipmaster.floating.R
 import com.clipmaster.floating.clipboard.ClipboardHelper
 import com.clipmaster.floating.data.db.ClipEntry
 import com.clipmaster.floating.data.repository.ClipRepository
+import com.clipmaster.floating.ui.bubble.BubbleCorner
 import com.clipmaster.floating.ui.bubble.ClipPanel
 import com.clipmaster.floating.ui.bubble.FloatingBubble
 import com.clipmaster.floating.ui.theme.ClipMasterTheme
@@ -81,10 +82,11 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         showBubble()
 
         // Full two-way link to the phone's system clipboard: pick up anything
-        // copied anywhere on the device, in addition to the accessibility-based
-        // screen scraping already used for capture.
+        // copied anywhere on the device (plus whatever's on it right now),
+        // and write clips back to it via ClipboardHelper elsewhere below.
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipboardListener)
+        onSystemClipboardChanged() // capture whatever's already on the clipboard, not just future changes
 
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
@@ -209,24 +211,51 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private fun snapToNearestEdge(view: View, params: WindowManager.LayoutParams, bubbleSizePx: Int) {
         val screen = screenSize()
         val clampedY = params.y.coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
-        val targetX = if (params.x + bubbleSizePx / 2 < screen.x / 2) {
-            0
-        } else {
-            (screen.x - bubbleSizePx).coerceAtLeast(0)
+        val targetX = nearestEdgeX(params.x, bubbleSizePx, screen.x)
+
+        animateBubbleTo(view, params, targetX, clampedY)
+        saveBubblePosition(targetX, clampedY, screen.x, bubbleSizePx)
+    }
+
+    /** Explicit placement requested from the clip panel's "Move" menu. */
+    private fun moveBubbleToCorner(corner: BubbleCorner) {
+        val view = bubbleView ?: return
+        val params = bubbleParams ?: return
+        val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
+        val screen = screenSize()
+        val margin = dpToPx(24)
+
+        val targetX = when (corner) {
+            BubbleCorner.TOP_LEFT, BubbleCorner.BOTTOM_LEFT -> 0
+            BubbleCorner.TOP_RIGHT, BubbleCorner.BOTTOM_RIGHT -> (screen.x - bubbleSizePx).coerceAtLeast(0)
+        }
+        val targetY = when (corner) {
+            BubbleCorner.TOP_LEFT, BubbleCorner.TOP_RIGHT -> margin
+            BubbleCorner.BOTTOM_LEFT, BubbleCorner.BOTTOM_RIGHT ->
+                (screen.y - bubbleSizePx - margin).coerceAtLeast(0)
         }
 
-        params.y = clampedY
-        ValueAnimator.ofInt(params.x, targetX).apply {
+        animateBubbleTo(view, params, targetX, targetY)
+        saveBubblePosition(targetX, targetY, screen.x, bubbleSizePx)
+    }
+
+    private fun nearestEdgeX(x: Int, bubbleSizePx: Int, screenWidth: Int): Int =
+        if (x + bubbleSizePx / 2 < screenWidth / 2) 0 else (screenWidth - bubbleSizePx).coerceAtLeast(0)
+
+    private fun animateBubbleTo(view: View, params: WindowManager.LayoutParams, targetX: Int, targetY: Int) {
+        val startX = params.x
+        val startY = params.y
+        ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 220
             interpolator = DecelerateInterpolator()
             addUpdateListener { animator ->
-                params.x = animator.animatedValue as Int
+                val fraction = animator.animatedValue as Float
+                params.x = (startX + (targetX - startX) * fraction).toInt()
+                params.y = (startY + (targetY - startY) * fraction).toInt()
                 try { windowManager.updateViewLayout(view, params) } catch (_: Exception) {}
             }
             start()
         }
-
-        saveBubblePosition(targetX, clampedY, screen.x, bubbleSizePx)
     }
 
     private fun saveBubblePosition(x: Int, y: Int, screenWidth: Int, bubbleSizePx: Int) {
@@ -253,11 +282,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
         val screen = screenSize()
 
-        params.x = if (params.x + bubbleSizePx / 2 < screen.x / 2) {
-            0
-        } else {
-            (screen.x - bubbleSizePx).coerceAtLeast(0)
-        }
+        params.x = nearestEdgeX(params.x, bubbleSizePx, screen.x)
         params.y = params.y.coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
 
         try { windowManager.updateViewLayout(view, params) } catch (_: Exception) {}
@@ -331,6 +356,12 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                         },
                         onDelete = { entry ->
                             serviceScope.launch { repository.delete(entry) }
+                        },
+                        onMove = { corner -> moveBubbleToCorner(corner) },
+                        onClearAll = {
+                            // Panel stays open so the list visibly updates to
+                            // the empty state, confirming the clear happened.
+                            serviceScope.launch { repository.clearAll() }
                         },
                     )
                 }

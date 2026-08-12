@@ -6,23 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
+import com.clipmaster.floating.root.RootExecutor
 import com.clipmaster.floating.service.ClipAccessibilityService
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 object PermissionHelper {
 
     /** Attempts `su -c id` and checks for uid=0 in output. */
-    suspend fun hasRootAccess(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            val output = process.inputStream.bufferedReader().readText()
-            process.waitFor()
-            output.contains("uid=0")
-        } catch (_: Exception) {
-            false
-        }
-    }
+    suspend fun hasRootAccess(): Boolean = RootExecutor.isRootAvailable()
 
     fun hasOverlayPermission(context: Context): Boolean =
         Settings.canDrawOverlays(context)

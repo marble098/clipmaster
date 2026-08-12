@@ -1,5 +1,6 @@
 package com.clipmaster.floating.root
 
+import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.DataOutputStream
@@ -45,41 +46,23 @@ object RootExecutor {
      * This bypasses all foreground/background restrictions.
      */
     suspend fun setClipboard(text: String): Boolean {
-        // Escape single quotes in the text for shell safety
-        val escaped = text.replace("'", "'\\''")
-
-        // Use `am broadcast` with the clipboard as an alternative approach
-        // that's more stable across Android versions.
-        // Falls back to `service call clipboard` if needed.
+        // Clip content is arbitrary text copied from any app, so it must never
+        // be spliced directly into shell source (quotes/backticks/`$()` in it
+        // would otherwise let it run as commands under root). Base64-encode it
+        // and decode into a shell variable instead — the base64 alphabet has
+        // no shell metacharacters, so this is safe regardless of content.
+        val encoded = Base64.encodeToString(text.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
         val commands = buildString {
-            // Primary method: input via `am` and content provider
-            appendLine("input keyevent --longpress 279 2>/dev/null || true")
-            // Robust method: write to clipboard via settings-style command
+            appendLine("CLIP_TEXT=\$(printf '%s' '$encoded' | base64 -d)")
             appendLine(
-                """
-                content call --uri content://clipboard/primary \
-                  --method write \
-                  --extra text:string:'$escaped' 2>/dev/null || \
-                am broadcast \
-                  -a clipmaster.SET_CLIPBOARD \
-                  --es text '$escaped' 2>/dev/null || \
-                service call clipboard 2 i32 1 i32 0 \
-                  s16 "com.clipmaster.floating" \
-                  s16 "$escaped" i32 0 i32 0 2>/dev/null
-                """.trimIndent()
+                "content call --uri content://clipboard/primary --method write " +
+                    "--extra text:string:\"\$CLIP_TEXT\" 2>/dev/null || " +
+                    "service call clipboard 2 i32 1 i32 0 s16 \"com.clipmaster.floating\" " +
+                    "s16 \"\$CLIP_TEXT\" i32 0 i32 0 2>/dev/null"
             )
         }
 
         val result = exec(commands)
-        return result.exitCode == 0
-    }
-
-    /**
-     * Simulate a paste keystroke (Ctrl+V) via root input command.
-     * Useful after setting the clipboard to trigger a paste into the focused field.
-     */
-    suspend fun simulatePaste(): Boolean {
-        val result = exec("input keyevent 279") // KEYCODE_PASTE
         return result.exitCode == 0
     }
 

@@ -9,18 +9,41 @@ android {
     namespace = "com.clipmaster.floating"
     compileSdk = 34
 
+    // CI (GitHub Actions) sets GITHUB_RUN_NUMBER, which increments on every
+    // workflow run — using it here means every build gets its own unique,
+    // ever-increasing version automatically, with no manual bump required.
+    // Local/non-CI builds fall back to a fixed dev version.
+    val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
     defaultConfig {
         applicationId = "com.clipmaster.floating"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = ciBuildNumber
+        versionName = "1.0.$ciBuildNumber"
+    }
+
+    signingConfigs {
+        create("release") {
+            // Committed keystore (keystore/clipmaster-release.jks) so every build —
+            // local or CI, any commit — signs with the same certificate. Without
+            // this, Android refuses to install an update over a differently
+            // signed build ("signatures do not match").
+            val keystoreFile = rootProject.file("keystore/clipmaster-release.jks")
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
+                storePassword = "android"
+                keyAlias = "clipmaster"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

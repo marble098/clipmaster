@@ -10,4 +10,5 @@
 *.apk
 *.aab
 *.jks
+!/keystore/clipmaster-release.jks
 /app/build/
