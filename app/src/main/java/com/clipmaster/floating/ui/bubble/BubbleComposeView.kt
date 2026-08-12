@@ -38,6 +38,8 @@ enum class BubbleCorner { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT }
 @Composable
 fun ClipPanel(
     entries: List<ClipEntry>,
+    historyLimit: Int,
+    showSourceApp: Boolean,
     expanded: Boolean,
     onCollapse: () -> Unit,
     onCapture: () -> Unit,
@@ -47,6 +49,7 @@ fun ClipPanel(
     onDelete: (ClipEntry) -> Unit,
     onMove: (BubbleCorner) -> Unit,
     onClearAll: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
     var moveMenuExpanded by remember { mutableStateOf(false) }
@@ -117,8 +120,11 @@ fun ClipPanel(
                     Spacer(Modifier.width(8.dp))
                     Text("Clipboard", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                     Spacer(Modifier.weight(1f))
-                    Text("${entries.size}/50", color = Color.White.copy(0.7f), fontSize = 12.sp)
-                    Spacer(Modifier.width(8.dp))
+                    Text("${entries.size}/$historyLimit", color = Color.White.copy(0.7f), fontSize = 12.sp)
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(onClick = onOpenSettings, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Rounded.Settings, "Settings", tint = Color.White, modifier = Modifier.size(18.dp))
+                    }
                     IconButton(onClick = onCollapse, modifier = Modifier.size(28.dp)) {
                         Icon(Icons.Rounded.Close, "Close", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
@@ -213,6 +219,7 @@ fun ClipPanel(
                         items(entries, key = { it.id }) { entry ->
                             ClipEntryRow(
                                 entry = entry,
+                                showSourceApp = showSourceApp,
                                 onCopy = { onCopy(entry) },
                                 onEdit = { editingEntry = entry },
                                 onShare = { onShare(entry) },
@@ -257,6 +264,7 @@ private fun ActionChip(
 @Composable
 private fun ClipEntryRow(
     entry: ClipEntry,
+    showSourceApp: Boolean,
     onCopy: () -> Unit,
     onEdit: () -> Unit,
     onShare: () -> Unit,
@@ -282,14 +290,18 @@ private fun ClipEntryRow(
             )
             Spacer(Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = entry.sourceApp ?: "Unknown",
-                    color = Color.White.copy(0.35f),
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                if (showSourceApp) {
+                    Text(
+                        text = entry.sourceApp ?: "Unknown",
+                        color = Color.White.copy(0.35f),
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
                 RowIconButton(Icons.Rounded.ContentCopy, "Copy to clipboard", onCopy)
                 RowIconButton(Icons.Rounded.Edit, "Edit", onEdit)
                 RowIconButton(Icons.Rounded.Share, "Share", onShare)

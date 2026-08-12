@@ -43,6 +43,7 @@ fun OnboardingScreen(
     onRequestOverlay: () -> Unit,
     onRequestAccessibility: () -> Unit,
     onFinish: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val steps = listOf(
         PermStep(
@@ -85,6 +86,16 @@ fun OnboardingScreen(
                 )
             )
     ) {
+        IconButton(
+            onClick = onOpenSettings,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .systemBarsPadding()
+                .padding(12.dp),
+        ) {
+            Icon(Icons.Rounded.Settings, "Settings", tint = Color.White.copy(alpha = 0.8f))
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()

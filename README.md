@@ -97,9 +97,9 @@ ClipMaster/
 
 1. Push this repo to GitHub.
 2. The workflow triggers on every push to `main`.
-3. Download artifacts from the Actions tab:
-   - **ClipMaster-APK** — signed standalone APK
-   - **ClipMaster-KernelSU-Module** — flashable .zip for KernelSU/Magisk
+3. Get the build either way:
+   - **GitHub Release** (recommended) — each push to `main` publishes a release tagged `v1.0.<run number>` with `ClipMaster.apk` and `ClipMaster-KernelSU-Module.zip` attached as direct, native-format assets (an `.apk` downloads as an `.apk`, not wrapped in an extra zip).
+   - **Actions artifacts** — the same two files are also uploaded as workflow artifacts (`ClipMaster-APK`, `ClipMaster-KernelSU-Module`) for every run, including PRs. Note: GitHub always wraps *artifact* downloads in an extra zip, regardless of the file inside — that's a platform-level behavior of Actions artifacts, not something this workflow controls. Use the Release assets above to avoid that extra layer.
 
 ### Locally (if needed)
 
@@ -126,19 +126,31 @@ ClipMaster/
 
 ## Smart Bubble Positioning
 
-The floating bubble behaves like a chat head, with two ways to reposition it:
-- **Drag + edge snapping**: Releasing a drag glides the bubble to whichever screen edge (left/right) it's closer to, animated with a `ValueAnimator`.
+The floating bubble behaves like a chat head, with several ways to reposition it:
+- **Drag + edge snapping**: Releasing a drag glides the bubble to whichever screen edge (left/right) it's closer to, animated with a `ValueAnimator`. Toggle **Snap to screen edges** off in Settings to drop it exactly where you release it instead (full manual placement).
 - **Tap-to-move**: The panel's "Move" chip opens a menu to jump the bubble straight to any of the four screen corners.
-- **Bounds-aware**: The bubble is clamped vertically during drag and after rotation so it never lands under the status bar or nav bar.
-- **Remembers its spot**: The resting position is saved to `SharedPreferences` and restored the next time `FloatingBubbleService` starts.
-- **Rotation-aware**: `onConfigurationChanged` re-clamps and re-snaps the bubble when the screen rotates.
+- **Reset**: Settings has a one-tap "Reset bubble position" action, applied live via a broadcast to the running service.
+- **Bounds-aware**: The bubble is clamped during drag and after rotation so it never lands under the status bar or nav bar, or off-screen.
+- **Remembers its spot**: The resting position (edge or exact coordinates, depending on the snap setting) is saved to `SharedPreferences` and restored the next time `FloatingBubbleService` starts.
+- **Auto-hide when empty**: With clip history empty, the bubble hides itself (it never hides while its own panel is open) and reappears the instant something is captured — capture keeps working in the background regardless, since it's driven by the system clipboard listener, not bubble visibility. Toggle this off in Settings to always keep the bubble visible.
+
+## Settings
+
+A full settings screen (`SettingsActivity` / `SettingsScreen.kt`, reachable from the panel's gear icon or from the onboarding screen) backed by `SettingsStore` (SharedPreferences + `StateFlow`, live across the running service and any UI):
+- Snap bubble to screen edges (on/off)
+- Auto-hide bubble when clipboard is empty (on/off)
+- Auto-capture from system clipboard (on/off — disable to only save clips via manual screen capture)
+- Show source app under each clip (on/off)
+- Clip history limit (20 / 50 / 100 / 200), which also drives `ClipDao`'s FIFO cap
+- Reset bubble position
+- Clear all clips
 
 ## FIFO Logic
 
-The Room database enforces a strict 50-entry cap:
-1. On every insert, `ClipDao.pruneOldEntries()` runs a DELETE that keeps only the 50 newest rows by timestamp.
+The Room database enforces a FIFO cap set by the "Clip history limit" setting (default 50):
+1. On every insert, `ClipDao.pruneOldEntries(limit)` runs a DELETE that keeps only the `limit` newest rows by timestamp.
 2. Back-to-back duplicate text is skipped at the repository layer.
-3. The UI observes `ClipDao.observeRecent()` (a `Flow<List<ClipEntry>>`) for live updates.
+3. The UI observes `ClipDao.observeRecent(limit)` (a `Flow<List<ClipEntry>>`) for live updates; `ClipDao.observeCount()` separately tracks the total count for bubble auto-hide, independent of the display limit.
 
 ## KernelSU Module Packaging
 

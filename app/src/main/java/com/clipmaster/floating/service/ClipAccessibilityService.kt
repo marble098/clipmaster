@@ -5,6 +5,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.clipmaster.floating.ClipMasterApp
 import com.clipmaster.floating.data.repository.ClipRepository
+import com.clipmaster.floating.settings.SettingsStore
 import kotlinx.coroutines.*
 
 /**
@@ -67,7 +68,9 @@ class ClipAccessibilityService : AccessibilityService() {
         val captured = builder.toString().trim()
         if (captured.isNotBlank()) {
             val pkg = root.packageName?.toString()
-            scope.launch { repository.addClip(captured, pkg) }
+            scope.launch {
+                repository.addClip(captured, pkg, SettingsStore.current().historyLimit)
+            }
         }
     }
 

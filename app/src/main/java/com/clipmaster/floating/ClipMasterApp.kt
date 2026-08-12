@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import com.clipmaster.floating.data.db.ClipDatabase
+import com.clipmaster.floating.settings.SettingsStore
 
 class ClipMasterApp : Application() {
 
@@ -11,6 +12,7 @@ class ClipMasterApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        SettingsStore.init(this)
         createNotificationChannel()
     }
 

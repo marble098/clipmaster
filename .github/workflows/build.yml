@@ -7,6 +7,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write # required to publish the GitHub Release below
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,14 +46,14 @@ jobs:
       - name: Rename signed APK
         run: |
           cp app/build/outputs/apk/release/app-release.apk \
-             app/build/outputs/apk/release/ClipMaster-signed.apk
+             app/build/outputs/apk/release/ClipMaster.apk
 
       - name: Package KernelSU Module
         run: |
           MODULE_DIR="build/kernelsu-module"
           mkdir -p "$MODULE_DIR/system/app/ClipMaster"
 
-          cp app/build/outputs/apk/release/ClipMaster-signed.apk \
+          cp app/build/outputs/apk/release/ClipMaster.apk \
              "$MODULE_DIR/system/app/ClipMaster/ClipMaster.apk"
           cp kernelsu/module.prop "$MODULE_DIR/"
           cp kernelsu/customize.sh "$MODULE_DIR/"
@@ -85,7 +88,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ClipMaster-APK
-          path: app/build/outputs/apk/release/ClipMaster-signed.apk
+          path: app/build/outputs/apk/release/ClipMaster.apk
           if-no-files-found: error
 
       - name: Upload KernelSU Module
@@ -94,3 +97,20 @@ jobs:
           name: ClipMaster-KernelSU-Module
           path: ClipMaster-KernelSU-Module.zip
           if-no-files-found: error
+
+      # actions/upload-artifact (above) always wraps its contents in an extra
+      # zip on download — that's inherent to how GitHub Actions artifact
+      # storage works and isn't something this workflow can turn off.
+      # GitHub Release assets don't have that problem: each file downloads
+      # in its own real format — the APK as a plain .apk, and the KernelSU
+      # module as its own .zip (that's its correct native format as a
+      # flashable module, not an extra wrapper layer around it).
+      - name: Publish native-format release assets
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: ClipMaster v1.0.${{ github.run_number }}
+          files: |
+            app/build/outputs/apk/release/ClipMaster.apk
+            ClipMaster-KernelSU-Module.zip

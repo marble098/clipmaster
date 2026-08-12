@@ -6,14 +6,17 @@ import kotlinx.coroutines.flow.Flow
 
 class ClipRepository(private val dao: ClipDao) {
 
-    /** Observe the 50 most recent entries as a reactive Flow. */
-    fun recentClips(): Flow<List<ClipEntry>> = dao.observeRecent()
+    /** Observe the [limit] most recent entries as a reactive Flow. */
+    fun recentClips(limit: Int): Flow<List<ClipEntry>> = dao.observeRecent(limit)
+
+    /** Observe the total clip count, independent of any display limit. */
+    fun clipCount(): Flow<Int> = dao.observeCount()
 
     /**
      * Insert a new clip, skip if it duplicates the most recent entry,
-     * then prune to enforce the 50-item FIFO cap.
+     * then prune to enforce the [historyLimit] FIFO cap.
      */
-    suspend fun addClip(content: String, sourceApp: String? = null) {
+    suspend fun addClip(content: String, sourceApp: String? = null, historyLimit: Int) {
         val trimmed = content.trim()
         if (trimmed.isBlank()) return
 
@@ -22,7 +25,7 @@ class ClipRepository(private val dao: ClipDao) {
         if (last != null && last.content == trimmed) return
 
         dao.insert(ClipEntry(content = trimmed, sourceApp = sourceApp))
-        dao.pruneOldEntries()
+        dao.pruneOldEntries(historyLimit)
     }
 
     suspend fun delete(entry: ClipEntry) = dao.delete(entry)

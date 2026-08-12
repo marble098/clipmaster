@@ -4,9 +4,11 @@ import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Point
@@ -20,6 +22,7 @@ import android.view.animation.DecelerateInterpolator
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.*
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
@@ -30,12 +33,17 @@ import com.clipmaster.floating.R
 import com.clipmaster.floating.clipboard.ClipboardHelper
 import com.clipmaster.floating.data.db.ClipEntry
 import com.clipmaster.floating.data.repository.ClipRepository
+import com.clipmaster.floating.settings.SettingsStore
 import com.clipmaster.floating.ui.bubble.BubbleCorner
 import com.clipmaster.floating.ui.bubble.ClipPanel
 import com.clipmaster.floating.ui.bubble.FloatingBubble
+import com.clipmaster.floating.ui.settings.SettingsActivity
 import com.clipmaster.floating.ui.theme.ClipMasterTheme
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlin.math.abs
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 
@@ -67,6 +75,17 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         getSharedPreferences("clipmaster_bubble", Context.MODE_PRIVATE)
     }
 
+    // True once the clip list is empty and "auto-hide" is on; combined with
+    // panelShowing in applyBubbleVisibility() to decide the bubble's actual
+    // on-screen visibility.
+    private var bubbleShouldHide = false
+
+    private val resetPositionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            resetBubblePosition()
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -80,6 +99,14 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
         startForegroundNotification()
         showBubble()
+        observeBubbleVisibility()
+
+        ContextCompat.registerReceiver(
+            this,
+            resetPositionReceiver,
+            IntentFilter(ACTION_RESET_BUBBLE_POSITION),
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
 
         // Full two-way link to the phone's system clipboard: pick up anything
         // copied anywhere on the device (plus whatever's on it right now),
@@ -95,6 +122,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     override fun onDestroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         clipboardManager.removePrimaryClipChangedListener(clipboardListener)
+        unregisterReceiver(resetPositionReceiver)
         serviceScope.cancel()
         bubbleView?.let { windowManager.removeView(it) }
         panelView?.let { windowManager.removeView(it) }
@@ -102,12 +130,36 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     }
 
     private fun onSystemClipboardChanged() {
+        if (!SettingsStore.current().autoCaptureFromClipboard) return
         val text = ClipboardHelper.readPrimaryClip(this)?.trim() ?: return
         if (text.isBlank() || text == lastSeenClip) return
         lastSeenClip = text
         serviceScope.launch(Dispatchers.IO) {
-            repository.addClip(text, sourceApp = "System Clipboard")
+            repository.addClip(text, sourceApp = "System Clipboard", historyLimit = SettingsStore.current().historyLimit)
         }
+    }
+
+    /**
+     * Ties the bubble's visibility to "is there anything to show" plus the
+     * user's auto-hide preference — reactive to both, live, for as long as
+     * the service runs. The bubble never hides while the panel is open.
+     */
+    private fun observeBubbleVisibility() {
+        serviceScope.launch {
+            combine(
+                repository.clipCount(),
+                SettingsStore.settings.map { it.autoHideBubbleWhenEmpty }.distinctUntilChanged(),
+            ) { count, autoHide -> count == 0 && autoHide }
+                .distinctUntilChanged()
+                .collectLatest { shouldHide ->
+                    bubbleShouldHide = shouldHide
+                    applyBubbleVisibility()
+                }
+        }
+    }
+
+    private fun applyBubbleVisibility() {
+        bubbleView?.visibility = if (bubbleShouldHide && !panelShowing) View.GONE else View.VISIBLE
     }
 
     private fun startForegroundNotification() {
@@ -130,10 +182,15 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private fun showBubble() {
         val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
         val screen = screenSize()
-        val savedIsLeft = bubblePrefs.getBoolean(KEY_BUBBLE_LEFT, true)
         val savedY = bubblePrefs.getInt(KEY_BUBBLE_Y, screen.y / 3)
             .coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
-        val startX = if (savedIsLeft) 0 else (screen.x - bubbleSizePx).coerceAtLeast(0)
+        // Edge-snap remembers just which side; free placement remembers the exact X.
+        val startX = if (SettingsStore.current().snapBubbleToEdges) {
+            val savedIsLeft = bubblePrefs.getBoolean(KEY_BUBBLE_LEFT, true)
+            if (savedIsLeft) 0 else (screen.x - bubbleSizePx).coerceAtLeast(0)
+        } else {
+            bubblePrefs.getInt(KEY_BUBBLE_X, 0).coerceIn(0, (screen.x - bubbleSizePx).coerceAtLeast(0))
+        }
 
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -189,8 +246,16 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                     MotionEvent.ACTION_UP -> {
                         if (!moved) {
                             view.performClick()
-                        } else {
+                        } else if (SettingsStore.current().snapBubbleToEdges) {
                             snapToNearestEdge(view, params, bubbleSizePx)
+                        } else {
+                            // Manual placement: drop exactly where released, just
+                            // keep it fully on-screen.
+                            val bounds = screenSize()
+                            params.x = params.x.coerceIn(0, (bounds.x - bubbleSizePx).coerceAtLeast(0))
+                            params.y = params.y.coerceIn(0, (bounds.y - bubbleSizePx).coerceAtLeast(0))
+                            windowManager.updateViewLayout(view, params)
+                            saveBubblePosition(params.x, params.y, bounds.x, bubbleSizePx)
                         }
                         true
                     }
@@ -239,6 +304,18 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         saveBubblePosition(targetX, targetY, screen.x, bubbleSizePx)
     }
 
+    /** Moves the bubble back to its out-of-the-box default spot. */
+    private fun resetBubblePosition() {
+        val view = bubbleView ?: return
+        val params = bubbleParams ?: return
+        val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
+        val screen = screenSize()
+        val targetY = (screen.y / 3).coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
+
+        animateBubbleTo(view, params, 0, targetY)
+        saveBubblePosition(0, targetY, screen.x, bubbleSizePx)
+    }
+
     private fun nearestEdgeX(x: Int, bubbleSizePx: Int, screenWidth: Int): Int =
         if (x + bubbleSizePx / 2 < screenWidth / 2) 0 else (screenWidth - bubbleSizePx).coerceAtLeast(0)
 
@@ -262,6 +339,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         val isLeft = x < (screenWidth - bubbleSizePx) / 2
         bubblePrefs.edit()
             .putBoolean(KEY_BUBBLE_LEFT, isLeft)
+            .putInt(KEY_BUBBLE_X, x)
             .putInt(KEY_BUBBLE_Y, y)
             .apply()
     }
@@ -282,7 +360,11 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         val bubbleSizePx = dpToPx(BUBBLE_SIZE_DP)
         val screen = screenSize()
 
-        params.x = nearestEdgeX(params.x, bubbleSizePx, screen.x)
+        params.x = if (SettingsStore.current().snapBubbleToEdges) {
+            nearestEdgeX(params.x, bubbleSizePx, screen.x)
+        } else {
+            params.x.coerceIn(0, (screen.x - bubbleSizePx).coerceAtLeast(0))
+        }
         params.y = params.y.coerceIn(0, (screen.y - bubbleSizePx).coerceAtLeast(0))
 
         try { windowManager.updateViewLayout(view, params) } catch (_: Exception) {}
@@ -301,6 +383,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
     private fun showPanel() {
         panelShowing = true
+        applyBubbleVisibility() // never hide the bubble while its own panel is open
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -316,9 +399,10 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             view.setViewTreeLifecycleOwner(this)
             view.setViewTreeSavedStateRegistryOwner(this)
             view.setContent {
+                val settings by SettingsStore.settings.collectAsState()
                 val entries = remember { mutableStateListOf<ClipEntry>() }
-                LaunchedEffect(Unit) {
-                    repository.recentClips().collectLatest { list ->
+                LaunchedEffect(settings.historyLimit) {
+                    repository.recentClips(settings.historyLimit).collectLatest { list ->
                         entries.clear()
                         entries.addAll(list)
                     }
@@ -327,6 +411,8 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                 ClipMasterTheme {
                     ClipPanel(
                         entries = entries,
+                        historyLimit = settings.historyLimit,
+                        showSourceApp = settings.showSourceApp,
                         expanded = true,
                         onCollapse = { hidePanel() },
                         onCapture = {
@@ -363,6 +449,13 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                             // the empty state, confirming the clear happened.
                             serviceScope.launch { repository.clearAll() }
                         },
+                        onOpenSettings = {
+                            startActivity(
+                                Intent(this@FloatingBubbleService, SettingsActivity::class.java)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                            hidePanel()
+                        },
                     )
                 }
             }
@@ -385,12 +478,17 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             try { windowManager.removeView(it) } catch (_: Exception) {}
         }
         panelView = null
+        applyBubbleVisibility() // re-evaluate now that the panel's no longer pinning it visible
     }
 
     companion object {
         // Must match FloatingBubble's Box(.size(52.dp)) in BubbleComposeView.kt
         private const val BUBBLE_SIZE_DP = 52
         private const val KEY_BUBBLE_LEFT = "bubble_edge_left"
+        private const val KEY_BUBBLE_X = "bubble_x"
         private const val KEY_BUBBLE_Y = "bubble_y"
+
+        /** Sent by SettingsActivity's "Reset bubble position" action. App-internal only. */
+        const val ACTION_RESET_BUBBLE_POSITION = "com.clipmaster.floating.RESET_BUBBLE_POSITION"
     }
 }

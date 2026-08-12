@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.clipmaster.floating.service.FloatingBubbleService
 import com.clipmaster.floating.ui.onboarding.OnboardingScreen
 import com.clipmaster.floating.ui.onboarding.OnboardingViewModel
+import com.clipmaster.floating.ui.settings.SettingsActivity
 import com.clipmaster.floating.ui.theme.ClipMasterTheme
 import com.clipmaster.floating.util.PermissionHelper
 
@@ -37,6 +38,9 @@ class MainActivity : ComponentActivity() {
                     onFinish = {
                         startBubbleService()
                         finish()
+                    },
+                    onOpenSettings = {
+                        startActivity(Intent(this, SettingsActivity::class.java))
                     },
                 )
             }
