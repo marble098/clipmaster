@@ -3,6 +3,8 @@ package com.clipmaster.floating.service
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
@@ -20,9 +22,9 @@ import androidx.savedstate.SavedStateRegistryOwner
 import com.clipmaster.floating.ClipMasterApp
 import com.clipmaster.floating.MainActivity
 import com.clipmaster.floating.R
+import com.clipmaster.floating.clipboard.ClipboardHelper
 import com.clipmaster.floating.data.db.ClipEntry
 import com.clipmaster.floating.data.repository.ClipRepository
-import com.clipmaster.floating.root.RootExecutor
 import com.clipmaster.floating.ui.bubble.ClipPanel
 import com.clipmaster.floating.ui.bubble.FloatingBubble
 import com.clipmaster.floating.ui.theme.ClipMasterTheme
@@ -48,6 +50,12 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private lateinit var repository: ClipRepository
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
+    private lateinit var clipboardManager: ClipboardManager
+    @Volatile private var lastSeenClip: String? = null
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
+        onSystemClipboardChanged()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -62,16 +70,32 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         startForegroundNotification()
         showBubble()
 
+        // Full two-way link to the phone's system clipboard: pick up anything
+        // copied anywhere on the device, in addition to the accessibility-based
+        // screen scraping already used for capture.
+        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboardManager.addPrimaryClipChangedListener(clipboardListener)
+
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
     }
 
     override fun onDestroy() {
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
+        clipboardManager.removePrimaryClipChangedListener(clipboardListener)
         serviceScope.cancel()
         bubbleView?.let { windowManager.removeView(it) }
         panelView?.let { windowManager.removeView(it) }
         super.onDestroy()
+    }
+
+    private fun onSystemClipboardChanged() {
+        val text = ClipboardHelper.readPrimaryClip(this)?.trim() ?: return
+        if (text.isBlank() || text == lastSeenClip) return
+        lastSeenClip = text
+        serviceScope.launch(Dispatchers.IO) {
+            repository.addClip(text, sourceApp = "System Clipboard")
+        }
     }
 
     private fun startForegroundNotification() {
@@ -198,10 +222,25 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                             ClipAccessibilityService.instance?.captureScreenText()
                             hidePanel()
                         },
-                        onPaste = { entry ->
+                        onCopy = { entry ->
                             serviceScope.launch(Dispatchers.IO) {
-                                RootExecutor.setClipboard(entry.content)
+                                lastSeenClip = entry.content
+                                ClipboardHelper.copyWithRootFallback(this@FloatingBubbleService, entry.content)
                             }
+                            hidePanel()
+                        },
+                        onEdit = { entry, newContent ->
+                            serviceScope.launch { repository.updateClip(entry, newContent) }
+                        },
+                        onShare = { entry ->
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(Intent.EXTRA_TEXT, entry.content)
+                            }
+                            val chooser = Intent.createChooser(shareIntent, "Share clip").apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(chooser)
                             hidePanel()
                         },
                         onDelete = { entry ->

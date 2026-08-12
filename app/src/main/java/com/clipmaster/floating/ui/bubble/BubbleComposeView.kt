@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -20,14 +21,16 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.clipmaster.floating.data.db.ClipEntry
 
 /**
  * The expanded clipboard panel shown when the floating bubble is tapped.
- * Displays recent clip history and provides capture/paste actions.
+ * Displays recent clip history and provides capture/copy/edit/share actions.
  */
 @Composable
 fun ClipPanel(
@@ -35,9 +38,24 @@ fun ClipPanel(
     expanded: Boolean,
     onCollapse: () -> Unit,
     onCapture: () -> Unit,
-    onPaste: (ClipEntry) -> Unit,
+    onCopy: (ClipEntry) -> Unit,
+    onEdit: (ClipEntry, String) -> Unit,
+    onShare: (ClipEntry) -> Unit,
     onDelete: (ClipEntry) -> Unit,
 ) {
+    var editingEntry by remember { mutableStateOf<ClipEntry?>(null) }
+
+    editingEntry?.let { entry ->
+        EditClipDialog(
+            entry = entry,
+            onDismiss = { editingEntry = null },
+            onSave = { newContent ->
+                onEdit(entry, newContent)
+                editingEntry = null
+            },
+        )
+    }
+
     AnimatedVisibility(
         visible = expanded,
         enter = scaleIn(spring(dampingRatio = 0.7f)) + fadeIn(),
@@ -119,7 +137,9 @@ fun ClipPanel(
                         items(entries, key = { it.id }) { entry ->
                             ClipEntryRow(
                                 entry = entry,
-                                onPaste = { onPaste(entry) },
+                                onCopy = { onCopy(entry) },
+                                onEdit = { editingEntry = entry },
+                                onShare = { onShare(entry) },
                                 onDelete = { onDelete(entry) },
                             )
                         }
@@ -133,7 +153,9 @@ fun ClipPanel(
 @Composable
 private fun ClipEntryRow(
     entry: ClipEntry,
-    onPaste: () -> Unit,
+    onCopy: () -> Unit,
+    onEdit: () -> Unit,
+    onShare: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Surface(
@@ -141,31 +163,103 @@ private fun ClipEntryRow(
         color = Color.White.copy(alpha = 0.06f),
         shape = RoundedCornerShape(12.dp),
     ) {
-        Row(
+        Column(
             modifier = Modifier
-                .clickable(onClick = onPaste)
+                .clickable(onClick = onCopy)
                 .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = entry.content,
-                    color = Color.White.copy(0.9f),
-                    fontSize = 13.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    lineHeight = 18.sp,
-                )
-                Spacer(Modifier.height(4.dp))
+            Text(
+                text = entry.content,
+                color = Color.White.copy(0.9f),
+                fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 18.sp,
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = entry.sourceApp ?: "Unknown",
                     color = Color.White.copy(0.35f),
                     fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                RowIconButton(Icons.Rounded.ContentCopy, "Copy to clipboard", onCopy)
+                RowIconButton(Icons.Rounded.Edit, "Edit", onEdit)
+                RowIconButton(Icons.Rounded.Share, "Share", onShare)
+                RowIconButton(Icons.Rounded.DeleteOutline, "Delete", onDelete)
             }
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Rounded.DeleteOutline, "Delete", tint = Color.White.copy(0.3f), modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun RowIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, modifier = Modifier.size(26.dp)) {
+        Icon(icon, contentDescription, tint = Color.White.copy(0.4f), modifier = Modifier.size(15.dp))
+    }
+}
+
+/**
+ * Dialog for editing a clip's text before it's saved back to history.
+ */
+@Composable
+private fun EditClipDialog(
+    entry: ClipEntry,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var text by remember(entry.id) { mutableStateOf(entry.content) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E2E)),
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    "Edit clip",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 16.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 100.dp, max = 240.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = Color.White, fontSize = 13.sp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF818CF8),
+                        unfocusedBorderColor = Color.White.copy(0.2f),
+                        cursorColor = Color(0xFF818CF8),
+                    ),
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = Color.White.copy(0.6f))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { onSave(text) }, enabled = text.isNotBlank()) {
+                        Text("Save", color = Color(0xFF818CF8))
+                    }
+                }
             }
         }
     }

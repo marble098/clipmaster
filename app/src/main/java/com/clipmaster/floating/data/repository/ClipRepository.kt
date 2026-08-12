@@ -26,4 +26,11 @@ class ClipRepository(private val dao: ClipDao) {
     }
 
     suspend fun delete(entry: ClipEntry) = dao.delete(entry)
+
+    /** Update an existing clip's text in place, preserving its position/id. */
+    suspend fun updateClip(entry: ClipEntry, newContent: String) {
+        val trimmed = newContent.trim()
+        if (trimmed.isBlank() || trimmed == entry.content) return
+        dao.update(entry.copy(content = trimmed))
+    }
 }

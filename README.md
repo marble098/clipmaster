@@ -114,6 +114,13 @@ ClipMaster/
 | `BIND_ACCESSIBILITY_SERVICE` | Screen text capture + paste into fields |
 | Root (`su`) | System clipboard injection bypassing restrictions |
 
+## Clip Actions & System Clipboard
+
+- **System clipboard sync**: `FloatingBubbleService` registers a `ClipboardManager.OnPrimaryClipChangedListener`, so anything copied anywhere on the device is picked up into clip history automatically — not just text captured via the accessibility service.
+- **Re-copy**: Tapping a clip (or its copy icon) writes it back to the system clipboard via `ClipboardHelper`, which uses the standard `ClipboardManager` API first and falls back to the root shell write in `RootExecutor` if the OS blocks background clipboard access.
+- **Edit**: The edit icon opens a dialog to modify a clip's text in place (`ClipRepository.updateClip`), preserving its position in history.
+- **Share**: The share icon hands a clip's text to the Android share sheet (`Intent.ACTION_SEND`) so it can be sent to any app.
+
 ## FIFO Logic
 
 The Room database enforces a strict 50-entry cap:

@@ -13,6 +13,9 @@ interface ClipDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(entry: ClipEntry): Long
 
+    @Update
+    suspend fun update(entry: ClipEntry)
+
     @Delete
     suspend fun delete(entry: ClipEntry)
 
