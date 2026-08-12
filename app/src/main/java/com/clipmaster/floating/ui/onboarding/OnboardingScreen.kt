@@ -1,3 +1,4 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 package com.clipmaster.floating.ui.onboarding
 
 import androidx.compose.animation.*
