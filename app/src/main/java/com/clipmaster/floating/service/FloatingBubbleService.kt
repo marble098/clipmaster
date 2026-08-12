@@ -29,6 +29,8 @@ import com.clipmaster.floating.ui.theme.ClipMasterTheme
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.abs
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+
 
 class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
